@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import UseCaseCarousel from "@/components/UseCaseCarousel";
 import heroImage from "@/assets/hero-ar.jpg";
+import demoVideo from "@/assets/demo-video.mp4";
 
 const features = [
   {
@@ -49,11 +50,36 @@ const Dashboard = () => {
               <br />
               in mid-air.
             </h1>
-            <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
+            <p className="text-lg text-muted-foreground max-w-md leading-relaxed mb-4">
               Upload a PDF. Get AR-ready, step-by-step instructions — hands-free.
+            </p>
+            <p className="text-sm font-mono text-foreground/70 tracking-wide">
+              Scan product box → instant guided build.
             </p>
           </motion.div>
         </div>
+      </section>
+
+      {/* Demo Video */}
+      <section className="px-6 pb-24">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.7 }}
+          className="max-w-5xl mx-auto"
+        >
+          <div className="rounded-lg overflow-hidden border border-border">
+            <video
+              src={demoVideo}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="w-full h-auto"
+            />
+          </div>
+        </motion.div>
       </section>
 
       {/* Image */}
