@@ -6,50 +6,44 @@
 
 @layer base {
   :root {
-    --background: 220 20% 7%;
-    --foreground: 200 20% 95%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 8%;
 
-    --card: 220 18% 10%;
-    --card-foreground: 200 20% 95%;
+    --card: 0 0% 98%;
+    --card-foreground: 0 0% 8%;
 
-    --popover: 220 18% 10%;
-    --popover-foreground: 200 20% 95%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
 
-    --primary: 190 100% 50%;
-    --primary-foreground: 220 20% 5%;
+    --primary: 0 0% 8%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 16%;
-    --secondary-foreground: 200 20% 85%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 20%;
 
-    --muted: 220 15% 14%;
-    --muted-foreground: 215 15% 55%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
 
-    --accent: 150 100% 45%;
-    --accent-foreground: 220 20% 5%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 8%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 190 100% 50%;
+    --border: 0 0% 91%;
+    --input: 0 0% 91%;
+    --ring: 0 0% 8%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
-    --sidebar-background: 220 18% 8%;
-    --sidebar-foreground: 200 20% 90%;
-    --sidebar-primary: 190 100% 50%;
-    --sidebar-primary-foreground: 220 20% 5%;
-    --sidebar-accent: 220 15% 14%;
-    --sidebar-accent-foreground: 200 20% 90%;
-    --sidebar-border: 220 15% 18%;
-    --sidebar-ring: 190 100% 50%;
-
-    /* Custom tokens */
-    --glow-primary: 190 100% 50%;
-    --glow-accent: 150 100% 45%;
-    --surface-elevated: 220 16% 12%;
-    --ar-bg: 0 0% 0%;
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 0 0% 20%;
+    --sidebar-primary: 0 0% 8%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 20%;
+    --sidebar-border: 0 0% 91%;
+    --sidebar-ring: 0 0% 8%;
   }
 }
 
@@ -65,59 +59,5 @@
 
   code, .font-mono {
     font-family: 'JetBrains Mono', monospace;
-  }
-}
-
-@layer utilities {
-  .glow-primary {
-    box-shadow: 0 0 20px hsl(var(--primary) / 0.3), 0 0 60px hsl(var(--primary) / 0.1);
-  }
-
-  .glow-accent {
-    box-shadow: 0 0 20px hsl(var(--accent) / 0.3), 0 0 60px hsl(var(--accent) / 0.1);
-  }
-
-  .glow-text {
-    text-shadow: 0 0 20px hsl(var(--primary) / 0.5);
-  }
-
-  .ar-mode {
-    background: hsl(var(--ar-bg));
-  }
-
-  .step-text {
-    font-size: clamp(1.25rem, 4vw, 2rem);
-    line-height: 1.4;
-  }
-
-  .grid-pattern {
-    background-image: 
-      linear-gradient(hsl(var(--border) / 0.3) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(var(--border) / 0.3) 1px, transparent 1px);
-    background-size: 40px 40px;
-  }
-
-  .scan-line {
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      hsl(var(--primary) / 0.03) 50%,
-      transparent 100%
-    );
-    animation: scan 3s linear infinite;
-  }
-
-  @keyframes scan {
-    0% { transform: translateY(-100%); }
-    100% { transform: translateY(100%); }
-  }
-
-  @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 20px hsl(var(--primary) / 0.2); }
-    50% { box-shadow: 0 0 40px hsl(var(--primary) / 0.4); }
-  }
-
-  .pulse-glow {
-    animation: pulse-glow 2s ease-in-out infinite;
   }
 }
