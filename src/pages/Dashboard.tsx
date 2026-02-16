@@ -1,5 +1,6 @@
-import { motion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowRight, X, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import UseCaseCarousel from "@/components/UseCaseCarousel";
 import heroImage from "@/assets/hero-ar.jpg";
@@ -21,6 +22,21 @@ const features = [
 ];
 
 const Dashboard = () => {
+  const [showDemo, setShowDemo] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const openDemo = () => {
+    setShowDemo(true);
+  };
+
+  const closeDemo = () => {
+    setShowDemo(false);
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Nav */}
@@ -58,28 +74,6 @@ const Dashboard = () => {
             </p>
           </motion.div>
         </div>
-      </section>
-
-      {/* Demo Video */}
-      <section className="px-6 pb-24">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.7 }}
-          className="max-w-5xl mx-auto"
-        >
-          <div className="rounded-lg overflow-hidden border border-border">
-            <video
-              src={demoVideo}
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="w-full h-auto"
-            />
-          </div>
-        </motion.div>
       </section>
 
       {/* Image */}
@@ -149,9 +143,9 @@ const Dashboard = () => {
             Join the waitlist. Be among the first to experience spatial workflows.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Button size="lg" className="text-sm tracking-wide">
+            <Button size="lg" className="text-sm tracking-wide" onClick={openDemo}>
+              <Play className="w-4 h-4 mr-2" />
               Try the Demo
-              <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
             <Button size="lg" variant="outline" className="text-sm tracking-wide">
               Get Early Access
@@ -167,6 +161,46 @@ const Dashboard = () => {
           <span className="text-xs text-muted-foreground">© 2026</span>
         </div>
       </footer>
+
+      {/* Video Modal */}
+      <AnimatePresence>
+        {showDemo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/80 backdrop-blur-sm"
+            onClick={closeDemo}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="relative w-full max-w-4xl mx-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={closeDemo}
+                className="absolute -top-12 right-0 text-background/80 hover:text-background transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+              <div className="rounded-lg overflow-hidden border border-border shadow-2xl">
+                <video
+                  ref={videoRef}
+                  src={demoVideo}
+                  autoPlay
+                  controls
+                  playsInline
+                  className="w-full h-auto"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
