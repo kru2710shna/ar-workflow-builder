@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import UseCaseCarousel from "@/components/UseCaseCarousel";
 import heroImage from "@/assets/hero-ar.jpg";
 
 const features = [
@@ -48,13 +49,9 @@ const Dashboard = () => {
               <br />
               in mid-air.
             </h1>
-            <p className="text-lg text-muted-foreground max-w-md leading-relaxed mb-10">
+            <p className="text-lg text-muted-foreground max-w-md leading-relaxed">
               Upload a PDF. Get AR-ready, step-by-step instructions — hands-free.
             </p>
-            <Button size="lg" className="text-sm tracking-wide">
-              Try the Demo
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </Button>
           </motion.div>
         </div>
       </section>
@@ -77,6 +74,9 @@ const Dashboard = () => {
           </div>
         </motion.div>
       </section>
+
+      {/* Use Cases Carousel */}
+      <UseCaseCarousel />
 
       {/* Features */}
       <section className="py-24 px-6 border-t border-border">
@@ -122,10 +122,15 @@ const Dashboard = () => {
           <p className="text-muted-foreground mb-8 max-w-md">
             Join the waitlist. Be among the first to experience spatial workflows.
           </p>
-          <Button size="lg" className="text-sm tracking-wide">
-            Get Early Access
-            <ArrowRight className="w-4 h-4 ml-2" />
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button size="lg" className="text-sm tracking-wide">
+              Try the Demo
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Button>
+            <Button size="lg" variant="outline" className="text-sm tracking-wide">
+              Get Early Access
+            </Button>
+          </div>
         </motion.div>
       </section>
 
@@ -133,9 +138,7 @@ const Dashboard = () => {
       <footer className="border-t border-border py-8 px-6">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">IndustryXR</span>
-          <span className="text-xs text-muted-foreground">
-            © 2026
-          </span>
+          <span className="text-xs text-muted-foreground">© 2026</span>
         </div>
       </footer>
     </div>
