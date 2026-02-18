@@ -44,19 +44,25 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 function extractJsonFromText(text: string): unknown {
-  const fenced = text.match(/```json\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) return JSON.parse(fenced[1]);
+  // Remove markdown fences
+  text = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) return JSON.parse(trimmed);
+  // Find first { and last }
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
 
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+  if (first === -1 || last === -1) {
+    throw new Error("No JSON object found in model output.");
   }
 
-  throw new Error("Gemini did not return valid JSON.");
+  const candidate = text.slice(first, last + 1);
+
+  try {
+    return JSON.parse(candidate);
+  } catch (err) {
+    console.error("Raw model output:\n", text);
+    throw new Error("Model returned malformed JSON.");
+  }
 }
 
 function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
