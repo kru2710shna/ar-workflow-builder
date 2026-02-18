@@ -1,39 +1,39 @@
 // src/pages/Editor.tsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, FileText, Loader2, UploadCloud } from "lucide-react";
+import { ArrowRight, FileText, Loader2, UploadCloud, Link2, Unlink } from "lucide-react";
 
 import WorkflowEditor, { type WorkflowEditorStep } from "@/components/WorkflowEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 import "./editor.css";
-const key = import.meta.env.VITE_GEMINI_KEY;
 
 /**
- * Gemini response schema we expect (strict JSON)
+ * Extend the editor step with optional PDF page mapping.
+ * (WorkflowEditor will ignore extra fields safely)
  */
+type EditorStep = WorkflowEditorStep & {
+  page?: number; // 1-based page number
+};
+
 type GeminiWorkflow = {
   title?: string;
   steps: Array<{
     title: string;
     description?: string;
     durationSec?: number;
+    page?: number;
   }>;
 };
 
 const MODEL = "gemini-flash-latest";
-const url = `https://generativelanguage.googleapis.com/v1/models/${MODEL}:generateContent?key=${key}`;
-
-
-
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => {
       const res = String(r.result || "");
-      // data:application/pdf;base64,AAA...
       const base64 = res.split(",")[1];
       if (!base64) return reject(new Error("Failed to convert file to base64."));
       resolve(base64);
@@ -44,15 +44,12 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 function extractJsonFromText(text: string): unknown {
-  // 1) ```json ... ```
   const fenced = text.match(/```json\s*([\s\S]*?)```/i);
   if (fenced?.[1]) return JSON.parse(fenced[1]);
 
-  // 2) plain JSON
   const trimmed = text.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return JSON.parse(trimmed);
 
-  // 3) best-effort slice first {...} block
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -66,7 +63,6 @@ function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
   if (!raw || typeof raw !== "object") throw new Error("Gemini returned non-object JSON.");
 
   const wf = raw as any;
-
   if (!Array.isArray(wf.steps) || wf.steps.length === 0) {
     throw new Error("Gemini returned JSON but 'steps' is missing or empty.");
   }
@@ -83,9 +79,13 @@ function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
         durationSec = Math.round(s.durationSec);
       }
 
-      if (!title) throw new Error("Gemini produced a step without a title.");
+      let page: number | undefined = undefined;
+      if (typeof s.page === "number" && Number.isFinite(s.page) && s.page >= 1) {
+        page = Math.floor(s.page);
+      }
 
-      return { title, description, durationSec };
+      if (!title) throw new Error("Gemini produced a step without a title.");
+      return { title, description, durationSec, page };
     });
 
   return {
@@ -94,20 +94,13 @@ function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
   };
 }
 
-/**
- * Core Gemini call:
- * - Sends the PDF
- * - Strongly instructs: "diagram-first", "image-heavy", "ignore text"
- * - Must return STRICT JSON only
- */
 async function generateWorkflowFromPdf(pdfFile: File): Promise<GeminiWorkflow> {
   const key = import.meta.env.VITE_GEMINI_KEY as string | undefined;
   if (!key) throw new Error("Missing VITE_GEMINI_KEY in your .env file.");
 
   const base64 = await fileToBase64(pdfFile);
 
-  // NOTE: This prompt is tuned for IKEA-style manuals (diagram-heavy),
-  // but still works for recipes/SOPs: it prefers visuals when present.
+  // IMPORTANT: image-heavy / diagram-first + page alignment
   const prompt = `
 You are a workflow extraction engine that produces AR-ready step-by-step instructions.
 
@@ -122,6 +115,10 @@ Instructions:
 - 6 to 20 steps max. If the PDF is large, summarize to the essential steps.
 - If timing is implied (wait/bake/cure), set durationSec. Otherwise omit durationSec.
 
+CRITICAL: Align steps to PDF pages.
+For each step, include a 1-based "page" number indicating the most relevant PDF page where that step is shown (diagram/panel).
+If a step spans multiple pages, choose the best primary page.
+
 Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no extra keys):
 
 {
@@ -130,12 +127,14 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
     {
       "title": "Step title",
       "description": "1-3 sentences max",
-      "durationSec": 120
+      "durationSec": 120,
+      "page": 3
     }
   ]
 }
 `.trim();
 
+  // KEEP what’s working for you: v1beta + gemini-flash-latest
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
 
   const body = {
@@ -171,7 +170,6 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
   }
 
   const json = await res.json();
-
   const text =
     json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || "").join("") || "";
 
@@ -181,21 +179,43 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
 
 export default function Editor() {
   const [pdf, setPdf] = useState<File | null>(null);
-  const [title, setTitle] = useState<string>("");
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
-  // IMPORTANT: This must be WorkflowEditorStep[] because WorkflowEditor expects that type.
-  const [steps, setSteps] = useState<WorkflowEditorStep[]>([]);
+  const [title, setTitle] = useState<string>("");
+  const [steps, setSteps] = useState<EditorStep[]>([]);
+
+  const [alignMode, setAlignMode] = useState(false);
+  const [activePage, setActivePage] = useState<number>(1);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canGenerate = useMemo(() => !!pdf && !loading, [pdf, loading]);
 
+  // Create/revoke object URL for PDF viewing
+  useEffect(() => {
+    if (!pdf) {
+      setPdfUrl(null);
+      setAlignMode(false);
+      setActivePage(1);
+      return;
+    }
+
+    const url = URL.createObjectURL(pdf);
+    setPdfUrl(url);
+
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [pdf]);
+
   const onPickFile = (file: File | null) => {
     setError(null);
     setSteps([]);
     setTitle("");
     setPdf(file);
+    setAlignMode(false);
+    setActivePage(1);
   };
 
   const onGenerate = async () => {
@@ -208,19 +228,48 @@ export default function Editor() {
       const wf = await generateWorkflowFromPdf(pdf);
       setTitle(wf.title || pdf.name.replace(/\.pdf$/i, ""));
 
-      const nextSteps: WorkflowEditorStep[] = wf.steps.map((s, idx) => ({
+      const nextSteps: EditorStep[] = wf.steps.map((s, idx) => ({
         id: `step-${idx + 1}`,
         title: s.title || `Step ${idx + 1}`,
         description: s.description || "",
         durationSec: typeof s.durationSec === "number" ? s.durationSec : undefined,
+        page: typeof s.page === "number" ? s.page : undefined,
       }));
 
       setSteps(nextSteps);
+
+      // If align is on and the first step has a page, jump there
+      const firstPage = nextSteps.find((x) => typeof x.page === "number")?.page;
+      if (alignMode && firstPage) setActivePage(firstPage);
     } catch (e: any) {
       setError(e?.message || "Failed to generate workflow.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const onToggleAlign = () => {
+    // Only allow if we have a pdf loaded
+    if (!pdfUrl) return;
+    setAlignMode((v) => !v);
+
+    // When turning on, try to jump to first mapped page
+    if (!alignMode) {
+      const firstPage = steps.find((x) => typeof x.page === "number")?.page;
+      if (firstPage) setActivePage(firstPage);
+    }
+  };
+
+  const onSelectStep = (step: WorkflowEditorStep) => {
+    if (!alignMode) return;
+
+    const s = step as EditorStep;
+    if (typeof s.page === "number" && s.page >= 1) {
+      setActivePage(s.page);
+      return;
+    }
+
+    // If no page mapping exists for this step, do nothing (no UI disruption)
   };
 
   return (
@@ -305,6 +354,27 @@ export default function Editor() {
                   </p>
                   <h2 className="text-sm font-semibold">{title || "Workflow Steps"}</h2>
                 </div>
+
+                {/* Align toggle — small, minimal UI change */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  onClick={onToggleAlign}
+                  disabled={!pdfUrl}
+                >
+                  {alignMode ? (
+                    <>
+                      <Unlink className="w-4 h-4 mr-2" />
+                      Aligned
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-4 h-4 mr-2" />
+                      Align with PDF
+                    </>
+                  )}
+                </Button>
               </div>
 
               {/* If no steps yet, show a clean empty state */}
@@ -313,7 +383,29 @@ export default function Editor() {
                   Upload a PDF and click “Generate Workflow”. Your steps will appear here for editing.
                 </div>
               ) : (
-                <WorkflowEditor steps={steps} onUpdate={setSteps} />
+                <>
+                  {/* Workflow editor (unchanged UI) + step click support */}
+                  <WorkflowEditor steps={steps} onUpdate={setSteps} onSelectStep={onSelectStep} />
+
+                  {/* PDF viewer appears only when align is enabled */}
+                  {alignMode && pdfUrl && (
+                    <div className="mt-5 rounded-lg overflow-hidden border border-border">
+                      <object
+                        data={`${pdfUrl}#page=${activePage}`}
+                        type="application/pdf"
+                        className="w-full"
+                        style={{ height: 520 }}
+                      >
+                        <div className="p-4 text-sm text-muted-foreground">
+                          PDF preview unavailable in this browser. Try Chrome, or download the file.
+                        </div>
+                      </object>
+                      <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground font-mono">
+                        Viewing page {activePage}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

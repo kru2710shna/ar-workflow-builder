@@ -12,9 +12,10 @@ export type WorkflowEditorStep = {
 interface WorkflowEditorProps {
   steps: WorkflowEditorStep[];
   onUpdate: (steps: WorkflowEditorStep[]) => void;
+  onSelectStep?: (step: WorkflowEditorStep) => void;
 }
 
-const WorkflowEditor = ({ steps, onUpdate }: WorkflowEditorProps) => {
+const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -41,11 +42,11 @@ const WorkflowEditor = ({ steps, onUpdate }: WorkflowEditorProps) => {
     const next = steps.map((s) =>
       s.id === editingId
         ? {
-            ...s,
-            title: editTitle.trim() || "Untitled step",
-            description: editDescription.trim() || "",
-            durationSec: editTimer > 0 ? editTimer : undefined,
-          }
+          ...s,
+          title: editTitle.trim() || "Untitled step",
+          description: editDescription.trim() || "",
+          durationSec: editTimer > 0 ? editTimer : undefined,
+        }
         : s
     );
 
@@ -144,7 +145,10 @@ const WorkflowEditor = ({ steps, onUpdate }: WorkflowEditorProps) => {
                 </div>
               ) : (
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground leading-relaxed">
+                  <p
+                    className="text-sm font-semibold text-foreground leading-relaxed cursor-pointer"
+                    onClick={() => onSelectStep?.(step)}
+                  >
                     {step.title}
                   </p>
 
