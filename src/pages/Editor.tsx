@@ -6,7 +6,7 @@ import { ArrowRight, FileText, Loader2, UploadCloud, Link2, Unlink } from "lucid
 import WorkflowEditor, { type WorkflowEditorStep } from "@/components/WorkflowEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-
+import { v4 as uuidv4 } from "uuid";
 import "./editor.css";
 
 /**
@@ -42,6 +42,25 @@ function fileToBase64(file: File): Promise<string> {
     r.readAsDataURL(file);
   });
 }
+
+async function saveWorkflowToBackend(payload: any) {
+  const base = import.meta.env.VITE_API_BASE as string | undefined;
+  if (!base) throw new Error("Missing VITE_API_BASE in .env");
+
+  const res = await fetch(`${base}/api/workflows`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Backend save failed (${res.status}): ${t}`);
+  }
+
+  return res.json();
+}
+
 
 function extractJsonFromText(text: string): unknown {
   // Remove markdown fences
@@ -243,6 +262,25 @@ export default function Editor() {
       }));
 
       setSteps(nextSteps);
+      const workflowUUID = uuidv4();
+      const payload = {
+        workflowUUID,
+        workflowId: workflowUUID,
+        name: wf.title || pdf.name.replace(/\.pdf$/i, ""),
+        steps: nextSteps.map((s, idx) => ({
+          stepId: s.id,
+          order: idx + 1,
+          title: s.title,
+          description: s.description,
+          durationSec: s.durationSec,
+          page: (s as any).page,
+        })),
+        createdAt: new Date().toISOString(),
+      };
+
+      // send to backend (does not change UI)
+      await saveWorkflowToBackend(payload);
+
 
       // If align is on and the first step has a page, jump there
       const firstPage = nextSteps.find((x) => typeof x.page === "number")?.page;
