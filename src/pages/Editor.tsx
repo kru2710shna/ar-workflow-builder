@@ -62,24 +62,30 @@ async function saveWorkflowToBackend(payload: any) {
   return res.json();
 }
 
-
 function extractJsonFromText(text: string): unknown {
-  // Sometimes Gemini returns JSON directly, sometimes it wraps it in text.
-  // Strategy:
-  // 1) Try direct parse.
-  // 2) Fallback: strip fences and extract the biggest JSON object region.
-
   const cleaned = text
     .replace(/```json/gi, "")
     .replace(/```/g, "")
     .trim();
 
-  // 1) direct parse attempt
+  // helper: attempt parse, then repair newlines-in-strings
+  const tryParse = (s: string) => {
+    try {
+      return JSON.parse(s);
+    } catch (e) {
+      // Repair common case: raw newlines inside JSON strings
+      // (turn them into \n, which is valid JSON)
+      const repaired = s.replace(/\r?\n/g, "\\n");
+      return JSON.parse(repaired);
+    }
+  };
+
+  // 1) direct parse
   try {
-    return JSON.parse(cleaned);
+    return tryParse(cleaned);
   } catch { }
 
-  // 2) extract JSON object candidate
+  // 2) extract first { ... last }
   const first = cleaned.indexOf("{");
   const last = cleaned.lastIndexOf("}");
 
@@ -91,14 +97,13 @@ function extractJsonFromText(text: string): unknown {
   const candidate = cleaned.slice(first, last + 1);
 
   try {
-    return JSON.parse(candidate);
+    return tryParse(candidate);
   } catch (err) {
     console.error("Candidate JSON:\n", candidate);
     console.error("Raw model output:\n", text);
     throw new Error("Model returned malformed JSON.");
   }
 }
-
 
 function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
   if (!raw || typeof raw !== "object") throw new Error("Gemini returned non-object JSON.");
@@ -211,7 +216,7 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
                 durationSec: { type: "integer" },
                 page: { type: "integer" },
               },
-              required: ["title"],
+              required: ["title", "page"],
             },
           },
         },
@@ -239,7 +244,7 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
     throw new Error("Gemini returned empty output.");
   }
 
-  const parsed = JSON.parse(text);
+  const parsed = extractJsonFromText(text);
   return normalizeGeminiWorkflow(parsed);
 }
 
