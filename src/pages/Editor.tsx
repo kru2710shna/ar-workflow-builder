@@ -11,6 +11,12 @@ import "./editor.css";
 import { postWorkflow } from "@/lib/api";
 
 
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+
+if (!GEMINI_KEY) {
+  throw new Error("Missing GEMINI_API_KEY");
+}
+
 /**
  * Extend the editor step with optional PDF page mapping.
  * (WorkflowEditor will ignore extra fields safely)
@@ -122,8 +128,8 @@ function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
 }
 
 async function generateWorkflowFromPdf(pdfFile: File): Promise<GeminiWorkflow> {
-  const key = import.meta.env.VITE_GEMINI_KEY as string | undefined;
-  if (!key) throw new Error("Missing VITE_GEMINI_KEY in your .env file.");
+  const key = import.meta.env.GEMINI_API_KEY as string | undefined;
+  if (!key) throw new Error("Missing GEMINI_API_KEY in your .env file.");
 
   const base64 = await fileToBase64(pdfFile);
 
