@@ -64,26 +64,41 @@ async function saveWorkflowToBackend(payload: any) {
 
 
 function extractJsonFromText(text: string): unknown {
-  // Remove markdown fences
-  text = text.replace(/```json/g, "").replace(/```/g, "").trim();
+  // Sometimes Gemini returns JSON directly, sometimes it wraps it in text.
+  // Strategy:
+  // 1) Try direct parse.
+  // 2) Fallback: strip fences and extract the biggest JSON object region.
 
-  // Find first { and last }
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
+  const cleaned = text
+    .replace(/```json/gi, "")
+    .replace(/```/g, "")
+    .trim();
 
-  if (first === -1 || last === -1) {
+  // 1) direct parse attempt
+  try {
+    return JSON.parse(cleaned);
+  } catch { }
+
+  // 2) extract JSON object candidate
+  const first = cleaned.indexOf("{");
+  const last = cleaned.lastIndexOf("}");
+
+  if (first === -1 || last === -1 || last <= first) {
+    console.error("Raw model output:\n", text);
     throw new Error("No JSON object found in model output.");
   }
 
-  const candidate = text.slice(first, last + 1);
+  const candidate = cleaned.slice(first, last + 1);
 
   try {
     return JSON.parse(candidate);
   } catch (err) {
+    console.error("Candidate JSON:\n", candidate);
     console.error("Raw model output:\n", text);
     throw new Error("Model returned malformed JSON.");
   }
 }
+
 
 function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
   if (!raw || typeof raw !== "object") throw new Error("Gemini returned non-object JSON.");
@@ -181,6 +196,7 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
     generationConfig: {
       temperature: 0.2,
       maxOutputTokens: 2048,
+      response_mime_type: "application/json",
     },
   };
 
