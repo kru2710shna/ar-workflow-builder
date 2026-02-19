@@ -178,7 +178,6 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
 
   // KEEP what’s working for you: v1beta + gemini-flash-latest
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
-
   const body = {
     contents: [
       {
@@ -197,14 +196,13 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 2048,
-      responseMimeType: "application/json",
-      responseSchema: {
+      response_mime_type: "application/json",
+      response_schema: {
         type: "object",
         properties: {
           title: { type: "string" },
           steps: {
             type: "array",
-            minItems: 1,
             items: {
               type: "object",
               properties: {
@@ -214,16 +212,13 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
                 page: { type: "integer" },
               },
               required: ["title"],
-              additionalProperties: false,
             },
           },
         },
         required: ["steps"],
-        additionalProperties: false,
       },
     },
   };
-
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
