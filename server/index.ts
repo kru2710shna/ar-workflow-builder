@@ -27,7 +27,8 @@ const app = express();
 
 // ---------- Config ----------
 const PORT = Number(process.env.PORT || 10000);
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data"); // for Render disk: /var/data
+const DATA_DIR = process.env.DATA_DIR || "/tmp";
+ // for Render disk: /var/data
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"; // set to your frontend domain in prod
 
 app.use(
