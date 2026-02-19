@@ -1,7 +1,7 @@
 // src/lib/api.ts
 export function apiBase(): string {
-  const base = import.meta.env.GEMINI_API_KEY as string | undefined;
-  if (!base) throw new Error("Missing GEMINI_API_KEY");
+  const base = import.meta.env.VITE_API_BASE as string | undefined;
+  if (!base) throw new Error("Missing VITE_API_BASE");
   return base.replace(/\/+$/, "");
 }
 

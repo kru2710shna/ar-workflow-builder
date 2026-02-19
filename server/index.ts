@@ -164,36 +164,10 @@ app.get("/api/workflows/:workflowUUID", async (req, res) => {
     res.json(wf);
 });
 
-const store = new Map<string, WorkflowPayload>();
-// Fetch all workflows
-app.get("/api/workflows", (_req, res) => {
-    const all = Array.from(store.values());
-    return res.json(all);
-});
+// const store = new Map<string, WorkflowPayload>();
+// // Fetch all workflows
+// app.get("/api/workflows", (_req, res) => {
+//     const all = Array.from(store.values());
+//     return res.json(all);
+// });
 
-
-// Optional: update (PATCH) if you want to save edits without resending everything
-app.patch("/api/workflows/:workflowUUID", async (req, res) => {
-    const id = safeId(req.params.workflowUUID);
-    const existing = await readWorkflow(id);
-    if (!existing) return res.status(404).json({ error: "Not found" });
-
-    // allow updating name/steps
-    const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim() : existing.name;
-    const steps = Array.isArray(req.body?.steps) ? req.body.steps : existing.steps;
-
-    const next: WorkflowPayload = {
-        ...existing,
-        name,
-        steps,
-        updatedAt: nowISO(),
-    };
-
-    await writeWorkflow(next);
-    res.json(next);
-});
-
-app.listen(PORT, () => {
-    console.log(`API running on :${PORT}`);
-    console.log(`DATA_DIR=${DATA_DIR}`);
-});
