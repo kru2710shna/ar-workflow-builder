@@ -160,6 +160,7 @@ CRITICAL: Align steps to PDF pages.
 For each step, include a 1-based "page" number indicating the most relevant PDF page where that step is shown (diagram/panel).
 If a step spans multiple pages, choose the best primary page.
 
+Do not include backticks. Do not include explanations. Output must start with { and end with }.
 Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no extra keys):
 
 {
@@ -212,8 +213,15 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
   }
 
   const json = await res.json();
-  const text =
-    json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text || "").join("") || "";
+  const parts = json?.candidates?.[0]?.content?.parts || [];
+
+  // Gemini may return JSON as text OR as structured parts depending on mime mode
+  const text = parts.map((p: any) => p?.text ?? "").join("").trim();
+
+  if (!text) {
+    console.error("Gemini raw response:\n", json);
+    throw new Error("Gemini returned empty output.");
+  }
 
   const parsed = extractJsonFromText(text);
   return normalizeGeminiWorkflow(parsed);
