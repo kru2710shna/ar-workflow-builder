@@ -171,3 +171,9 @@ app.get("/api/workflows/:workflowUUID", async (req, res) => {
 //     return res.json(all);
 // });
 
+
+
+app.listen(PORT, () => {
+  console.log(`API running on :${PORT}`);
+  console.log(`DATA_DIR=${DATA_DIR}`);
+});
