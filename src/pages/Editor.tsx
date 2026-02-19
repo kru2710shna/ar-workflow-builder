@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { v4 as uuidv4 } from "uuid";
 import "./editor.css";
+import { postWorkflow } from "@/lib/api";
+
 
 /**
  * Extend the editor step with optional PDF page mapping.
@@ -206,6 +208,8 @@ export default function Editor() {
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
+  const [savedUUID, setSavedUUID] = useState<string | null>(null);
+
   const [title, setTitle] = useState<string>("");
   const [steps, setSteps] = useState<EditorStep[]>([]);
 
@@ -238,6 +242,7 @@ export default function Editor() {
     setError(null);
     setSteps([]);
     setTitle("");
+    setSavedUUID(null);
     setPdf(file);
     setAlignMode(false);
     setActivePage(1);
@@ -262,7 +267,10 @@ export default function Editor() {
       }));
 
       setSteps(nextSteps);
-      const workflowUUID = uuidv4();
+
+      const workflowUUID = crypto.randomUUID();
+      setSavedUUID(workflowUUID);
+
       const payload = {
         workflowUUID,
         workflowId: workflowUUID,
@@ -279,7 +287,7 @@ export default function Editor() {
       };
 
       // send to backend (does not change UI)
-      await saveWorkflowToBackend(payload);
+      await postWorkflow(payload);;
 
 
       // If align is on and the first step has a page, jump there
@@ -330,6 +338,19 @@ export default function Editor() {
 
       <main className="pt-24 pb-16 px-6">
         <div className="max-w-5xl mx-auto">
+          {savedUUID && (
+            <div className="mb-6 rounded-xl border border-border bg-card p-4">
+              <div className="text-xs text-muted-foreground">
+                Saved workflow ID: <span className="font-mono">{savedUUID}</span>
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Share link:{" "}
+                <span className="font-mono">
+                  {`${window.location.origin}/project/${savedUUID}`}
+                </span>
+              </div>
+            </div>
+          )}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
