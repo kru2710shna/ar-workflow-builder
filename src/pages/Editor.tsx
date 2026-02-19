@@ -195,9 +195,32 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
       },
     ],
     generationConfig: {
-      temperature: 0.2,
+      temperature: 0,
       maxOutputTokens: 2048,
-      response_mime_type: "application/json",
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          steps: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                durationSec: { type: "integer" },
+                page: { type: "integer" },
+              },
+              required: ["title"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["steps"],
+        additionalProperties: false,
+      },
     },
   };
 
@@ -213,9 +236,7 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
   }
 
   const json = await res.json();
-  const parts = json?.candidates?.[0]?.content?.parts || [];
-
-  // Gemini may return JSON as text OR as structured parts depending on mime mode
+  const parts = json?.candidates?.[0]?.content?.parts ?? [];
   const text = parts.map((p: any) => p?.text ?? "").join("").trim();
 
   if (!text) {
@@ -223,7 +244,7 @@ Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no ext
     throw new Error("Gemini returned empty output.");
   }
 
-  const parsed = extractJsonFromText(text);
+  const parsed = JSON.parse(text);
   return normalizeGeminiWorkflow(parsed);
 }
 
