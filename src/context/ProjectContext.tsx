@@ -1,5 +1,7 @@
+// src/context/ProjectContext.tsx
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { Project, mockProjects, WorkflowStep } from "@/data/mockData";
+import { mockProjects } from "@/data/mockData";
+import type { Project, WorkflowStep } from "@/types/workflow";
 
 interface ProjectContextType {
   projects: Project[];
@@ -38,16 +40,16 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         prev.map((p) =>
           p.id === newProject.id
             ? {
-                ...p,
-                status: "ready" as const,
-                stepsCount: 4,
-                steps: [
-                  { id: 1, text: "Unpack all components and verify against checklist.", timer: 0 },
-                  { id: 2, text: "Prepare workspace and required tools.", timer: 60 },
-                  { id: 3, text: "Follow assembly diagram on page 3.", timer: 300 },
-                  { id: 4, text: "Final quality check and cleanup.", timer: 60 },
-                ],
-              }
+              ...p,
+              status: "ready" as const,
+              stepsCount: 4,
+              steps: [
+                { id: "1", title: "Unpack all components and verify against checklist." },
+                { id: "2", title: "Prepare workspace and required tools.", durationSec: 60 },
+                { id: "3", title: "Follow assembly diagram on page 3.", durationSec: 300 },
+                { id: "4", title: "Final quality check and cleanup.", durationSec: 60 },
+              ],
+            }
             : p
         )
       );

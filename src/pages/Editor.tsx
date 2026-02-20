@@ -1,34 +1,18 @@
 // src/pages/Editor.tsx
 import { useMemo, useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, FileText, Loader2, UploadCloud, Link2, Unlink } from "lucide-react";
+import { ArrowRight, FileText, Loader2, UploadCloud, Link2, Unlink, Play } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 
-import WorkflowEditor, { type WorkflowEditorStep } from "@/components/WorkflowEditor";
+import WorkflowEditor from "@/components/WorkflowEditor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { v4 as uuidv4 } from "uuid";
-import "./editor.css";
 import { postWorkflow } from "@/lib/api";
+import type { WorkflowStep } from "@/types/workflow";
+import "./editor.css";
 
-/**
- * Extend the editor step with optional PDF page mapping.
- * (WorkflowEditor will ignore extra fields safely)
- */
-type EditorStep = WorkflowEditorStep & {
-  page?: number; // 1-based page number
-};
-
-type GeminiWorkflow = {
-  title?: string;
-  steps: Array<{
-    title: string;
-    description?: string;
-    durationSec?: number;
-    page?: number;
-  }>;
-};
-
-const MODEL = "gemini-flash-latest";
+// ---------- Helpers ----------
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -44,228 +28,61 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-async function saveWorkflowToBackend(payload: any) {
+type GeneratedWorkflow = {
+  title?: string;
+  steps: Array<{
+    title: string;
+    description?: string;
+    durationSec?: number;
+    page?: number;
+  }>;
+};
+
+/**
+ * Calls the Express backend which securely calls Claude Haiku server-side.
+ * No API key is ever sent to the browser.
+ */
+async function generateWorkflowFromPdf(pdfFile: File): Promise<GeneratedWorkflow> {
   const base = import.meta.env.VITE_API_BASE as string | undefined;
   if (!base) throw new Error("Missing VITE_API_BASE in .env");
 
-  const res = await fetch(`${base}/api/workflows`, {
+  const pdfBase64 = await fileToBase64(pdfFile);
+
+  const res = await fetch(`${base}/api/generate-workflow`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ pdfBase64, filename: pdfFile.name }),
   });
 
   if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Backend save failed (${res.status}): ${t}`);
+    const errText = await res.text();
+    throw new Error(`Workflow generation failed (${res.status}): ${errText}`);
   }
 
-  return res.json();
+  return res.json() as Promise<GeneratedWorkflow>;
 }
 
-function extractJsonFromText(text: string): unknown {
-  const cleaned = text
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
-
-  // helper: attempt parse, then repair newlines-in-strings
-  const tryParse = (s: string) => {
-    try {
-      return JSON.parse(s);
-    } catch (e) {
-      // Repair common case: raw newlines inside JSON strings
-      // (turn them into \n, which is valid JSON)
-      const repaired = s.replace(/\r?\n/g, "\\n");
-      return JSON.parse(repaired);
-    }
-  };
-
-  // 1) direct parse
-  try {
-    return tryParse(cleaned);
-  } catch { }
-
-  // 2) extract first { ... last }
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-
-  if (first === -1 || last === -1 || last <= first) {
-    console.error("Raw model output:\n", text);
-    throw new Error("No JSON object found in model output.");
-  }
-
-  const candidate = cleaned.slice(first, last + 1);
-
-  try {
-    return tryParse(candidate);
-  } catch (err) {
-    console.error("Candidate JSON:\n", candidate);
-    console.error("Raw model output:\n", text);
-    throw new Error("Model returned malformed JSON.");
-  }
-}
-
-function normalizeGeminiWorkflow(raw: unknown): GeminiWorkflow {
-  if (!raw || typeof raw !== "object") throw new Error("Gemini returned non-object JSON.");
-
-  const wf = raw as any;
-  if (!Array.isArray(wf.steps) || wf.steps.length === 0) {
-    throw new Error("Gemini returned JSON but 'steps' is missing or empty.");
-  }
-
-  const steps = wf.steps
-    .filter(Boolean)
-    .slice(0, 20)
-    .map((s: any) => {
-      const title = typeof s.title === "string" ? s.title.trim() : "";
-      const description = typeof s.description === "string" ? s.description.trim() : undefined;
-
-      let durationSec: number | undefined = undefined;
-      if (typeof s.durationSec === "number" && Number.isFinite(s.durationSec) && s.durationSec > 0) {
-        durationSec = Math.round(s.durationSec);
-      }
-
-      let page: number | undefined = undefined;
-      if (typeof s.page === "number" && Number.isFinite(s.page) && s.page >= 1) {
-        page = Math.floor(s.page);
-      }
-
-      if (!title) throw new Error("Gemini produced a step without a title.");
-      return { title, description, durationSec, page };
-    });
-
-  return {
-    title: typeof wf.title === "string" ? wf.title.trim() : undefined,
-    steps,
-  };
-}
-
-async function generateWorkflowFromPdf(pdfFile: File): Promise<GeminiWorkflow> {
-  const key = import.meta.env.VITE_GEMINI_KEY as string | undefined;
-  if (!key) throw new Error("Missing VITE_GEMINI_KEY in your .env file.");
-
-  const base64 = await fileToBase64(pdfFile);
-
-  // IMPORTANT: image-heavy / diagram-first + page alignment
-  const prompt = `
-You are a workflow extraction engine that produces AR-ready step-by-step instructions.
-
-The input is a PDF that may be IMAGE/DIAGRAM heavy (e.g., IKEA manuals with mostly pictures).
-Primary goal: infer steps from diagrams/illustrations. Treat visuals as the source of truth.
-
-Instructions:
-- If the PDF contains diagrams, exploded views, arrows, parts callouts, numbered panels: use those to infer the steps.
-- Ignore marketing text and irrelevant labels.
-- Only use text when it is necessary to disambiguate part names or safety warnings.
-- Produce concise, actionable, ordered steps.
-- 6 to 20 steps max. If the PDF is large, summarize to the essential steps.
-- If timing is implied (wait/bake/cure), set durationSec. Otherwise omit durationSec.
-
-CRITICAL: Align steps to PDF pages.
-For each step, include a 1-based "page" number indicating the most relevant PDF page where that step is shown (diagram/panel).
-If a step spans multiple pages, choose the best primary page.
-
-Do not include backticks. Do not include explanations. Output must start with { and end with }.
-Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no extra keys):
-
-{
-  "title": "short workflow name",
-  "steps": [
-    {
-      "title": "Step title",
-      "description": "1-3 sentences max",
-      "durationSec": 120,
-      "page": 3
-    }
-  ]
-}
-`.trim();
-
-  // KEEP what’s working for you: v1beta + gemini-flash-latest
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: prompt },
-          {
-            inline_data: {
-              mime_type: "application/pdf",
-              data: base64,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0,
-      maxOutputTokens: 2048,
-      response_mime_type: "application/json",
-      response_schema: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          steps: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                description: { type: "string" },
-                durationSec: { type: "integer" },
-                page: { type: "integer" },
-              },
-              required: ["title", "page"],
-            },
-          },
-        },
-        required: ["steps"],
-      },
-    },
-  };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errTxt = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${errTxt}`);
-  }
-
-  const json = await res.json();
-  const parts = json?.candidates?.[0]?.content?.parts ?? [];
-  const text = parts.map((p: any) => p?.text ?? "").join("").trim();
-
-  if (!text) {
-    console.error("Gemini raw response:\n", json);
-    throw new Error("Gemini returned empty output.");
-  }
-
-  const parsed = extractJsonFromText(text);
-  return normalizeGeminiWorkflow(parsed);
-}
+// ---------- Component ----------
 
 export default function Editor() {
+  const navigate = useNavigate();
+
   const [pdf, setPdf] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   const [savedUUID, setSavedUUID] = useState<string | null>(null);
-
   const [title, setTitle] = useState<string>("");
-  const [steps, setSteps] = useState<EditorStep[]>([]);
+  const [steps, setSteps] = useState<WorkflowStep[]>([]);
 
   const [alignMode, setAlignMode] = useState(false);
   const [activePage, setActivePage] = useState<number>(1);
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
 
-  const canGenerate = useMemo(() => !!pdf && !loading, [pdf, loading]);
+  const canGenerate = useMemo(() => !!pdf && !generating, [pdf, generating]);
 
-  // Create/revoke object URL for PDF viewing
+  // Object URL for in-browser PDF preview
   useEffect(() => {
     if (!pdf) {
       setPdfUrl(null);
@@ -273,17 +90,21 @@ export default function Editor() {
       setActivePage(1);
       return;
     }
-
     const url = URL.createObjectURL(pdf);
     setPdfUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
+    return () => URL.revokeObjectURL(url);
   }, [pdf]);
 
+  // Save mutation (TanStack Query)
+  const saveMutation = useMutation({
+    mutationFn: postWorkflow,
+    onError: (err: any) => {
+      console.error("Save to backend failed:", err?.message);
+    },
+  });
+
   const onPickFile = (file: File | null) => {
-    setError(null);
+    setGenError(null);
     setSteps([]);
     setTitle("");
     setSavedUUID(null);
@@ -294,18 +115,18 @@ export default function Editor() {
 
   const onGenerate = async () => {
     if (!pdf) return;
-
-    setLoading(true);
-    setError(null);
+    setGenerating(true);
+    setGenError(null);
 
     try {
       const wf = await generateWorkflowFromPdf(pdf);
-      setTitle(wf.title || pdf.name.replace(/\.pdf$/i, ""));
+      const workflowTitle = wf.title || pdf.name.replace(/\.pdf$/i, "");
+      setTitle(workflowTitle);
 
-      const nextSteps: EditorStep[] = wf.steps.map((s, idx) => ({
+      const nextSteps: WorkflowStep[] = wf.steps.map((s, idx) => ({
         id: `step-${idx + 1}`,
         title: s.title || `Step ${idx + 1}`,
-        description: s.description || "",
+        description: s.description || undefined,
         durationSec: typeof s.durationSec === "number" ? s.durationSec : undefined,
         page: typeof s.page === "number" ? s.page : undefined,
       }));
@@ -315,62 +136,51 @@ export default function Editor() {
       const workflowUUID = crypto.randomUUID();
       setSavedUUID(workflowUUID);
 
-      const payload = {
+      // Save to backend via TanStack Query mutation
+      saveMutation.mutate({
         workflowUUID,
         workflowId: workflowUUID,
-        name: wf.title || pdf.name.replace(/\.pdf$/i, ""),
+        name: workflowTitle,
         steps: nextSteps.map((s, idx) => ({
           stepId: s.id,
           order: idx + 1,
           title: s.title,
           description: s.description,
           durationSec: s.durationSec,
-          page: (s as any).page,
+          page: s.page,
         })),
         createdAt: new Date().toISOString(),
-      };
+      });
 
-      // send to backend (does not change UI)
-      await postWorkflow(payload);;
-
-
-      // If align is on and the first step has a page, jump there
+      // Jump to first mapped page if align mode is on
       const firstPage = nextSteps.find((x) => typeof x.page === "number")?.page;
       if (alignMode && firstPage) setActivePage(firstPage);
     } catch (e: any) {
-      setError(e?.message || "Failed to generate workflow.");
+      setGenError(e?.message || "Failed to generate workflow.");
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
   };
 
   const onToggleAlign = () => {
-    // Only allow if we have a pdf loaded
     if (!pdfUrl) return;
     setAlignMode((v) => !v);
-
-    // When turning on, try to jump to first mapped page
     if (!alignMode) {
       const firstPage = steps.find((x) => typeof x.page === "number")?.page;
       if (firstPage) setActivePage(firstPage);
     }
   };
 
-  const onSelectStep = (step: WorkflowEditorStep) => {
+  const onSelectStep = (step: WorkflowStep) => {
     if (!alignMode) return;
-
-    const s = step as EditorStep;
-    if (typeof s.page === "number" && s.page >= 1) {
-      setActivePage(s.page);
-      return;
+    if (typeof step.page === "number" && step.page >= 1) {
+      setActivePage(step.page);
     }
-
-    // If no page mapping exists for this step, do nothing (no UI disruption)
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Minimal nav to match Dashboard aesthetic */}
+      {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-sm border-b border-border">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <span className="text-sm font-semibold tracking-tight">XR</span>
@@ -382,19 +192,32 @@ export default function Editor() {
 
       <main className="pt-24 pb-16 px-6">
         <div className="max-w-5xl mx-auto">
+
+          {/* Saved workflow info + Launch in AR button */}
           {savedUUID && (
-            <div className="mb-6 rounded-xl border border-border bg-card p-4">
-              <div className="text-xs text-muted-foreground">
-                Saved workflow ID: <span className="font-mono">{savedUUID}</span>
+            <div className="mb-6 rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="text-xs text-muted-foreground">
+                  Workflow ID: <span className="font-mono">{savedUUID}</span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Share:{" "}
+                  <span className="font-mono">
+                    {`${window.location.origin}/run/${savedUUID}`}
+                  </span>
+                </div>
               </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                Share link:{" "}
-                <span className="font-mono">
-                  {`${window.location.origin}/project/${savedUUID}`}
-                </span>
-              </div>
+              <Button
+                size="sm"
+                className="shrink-0 gap-2"
+                onClick={() => navigate(`/run/${savedUUID}`)}
+              >
+                <Play className="w-4 h-4" />
+                Launch in AR
+              </Button>
             </div>
           )}
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -408,7 +231,7 @@ export default function Editor() {
               Turn a manual into steps.
             </h1>
             <p className="text-muted-foreground mt-2 max-w-2xl">
-              Upload a PDF (IKEA, recipe, SOP). Gemini extracts an AR-ready workflow you can edit.
+              Upload a PDF (IKEA, recipe, SOP). Claude Haiku extracts an AR-ready workflow you can edit.
             </p>
           </motion.div>
 
@@ -435,7 +258,7 @@ export default function Editor() {
                 )}
 
                 <Button onClick={onGenerate} disabled={!canGenerate} className="mt-2">
-                  {loading ? (
+                  {generating ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Generating…
@@ -447,7 +270,15 @@ export default function Editor() {
                   )}
                 </Button>
 
-                {error && <div className="text-sm text-destructive mt-2">{error}</div>}
+                {genError && (
+                  <div className="text-sm text-destructive mt-2">{genError}</div>
+                )}
+
+                {saveMutation.isError && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    ⚠ Auto-save failed — your workflow is still shown below.
+                  </div>
+                )}
 
                 <div className="text-xs text-muted-foreground mt-2">
                   Tip: Use a real IKEA PDF/manual for best extraction.
@@ -464,7 +295,6 @@ export default function Editor() {
                   <h2 className="text-sm font-semibold">{title || "Workflow Steps"}</h2>
                 </div>
 
-                {/* Align toggle — small, minimal UI change */}
                 <Button
                   size="sm"
                   variant="outline"
@@ -486,17 +316,14 @@ export default function Editor() {
                 </Button>
               </div>
 
-              {/* If no steps yet, show a clean empty state */}
               {steps.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-                  Upload a PDF and click “Generate Workflow”. Your steps will appear here for editing.
+                  Upload a PDF and click "Generate Workflow". Your steps will appear here for editing.
                 </div>
               ) : (
                 <>
-                  {/* Workflow editor (unchanged UI) + step click support */}
                   <WorkflowEditor steps={steps} onUpdate={setSteps} onSelectStep={onSelectStep} />
 
-                  {/* PDF viewer appears only when align is enabled */}
                   {alignMode && pdfUrl && (
                     <div className="mt-5 rounded-lg overflow-hidden border border-border">
                       <object
