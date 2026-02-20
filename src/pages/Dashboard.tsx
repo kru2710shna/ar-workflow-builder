@@ -1,11 +1,14 @@
-import { useState, useRef , useCallback} from "react";
+// src/pages/Dashboard.tsx
+import { useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowRight, X, Play } from "lucide-react";
+import { ArrowRight, X, Play, Mail, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import UseCaseCarousel from "@/components/UseCaseCarousel";
 import heroImage from "@/assets/hero-ar.jpg";
 import demoVideo from "@/assets/demo-video.mp4";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 const SHOW_START_NOW_LAST_SECONDS = 5;
 
@@ -24,6 +27,49 @@ const features = [
   },
 ];
 
+// Simple inline email capture — no backend needed.
+function EarlyAccessForm() {
+  const [email, setEmail] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSubmitted(true);
+    toast.success("You're on the list!", {
+      description: "We'll reach out when early access opens.",
+    });
+  };
+
+  if (submitted) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground font-mono">
+        <CheckCircle2 className="w-4 h-4 text-primary" />
+        You're on the list — we'll be in touch.
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2 max-w-sm">
+      <div className="relative flex-1">
+        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          type="email"
+          placeholder="your@email.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="pl-9 text-sm h-10"
+          required
+        />
+      </div>
+      <Button type="submit" size="sm" className="h-10 px-4 text-sm shrink-0">
+        Get Early Access
+      </Button>
+    </form>
+  );
+}
+
 const Dashboard = () => {
   const [showDemo, setShowDemo] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -38,36 +84,24 @@ const Dashboard = () => {
   const closeDemo = useCallback(() => {
     setShowDemo(false);
     setShowStartNow(false);
-
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
   }, []);
 
-
   const updateStartNowVisibility = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-
     const duration = Number.isFinite(v.duration) ? v.duration : 0;
     const remaining = duration - v.currentTime;
-
-    // Only show if we actually know duration, and we're within the last N seconds
     const shouldShow =
       duration > 0 && remaining <= SHOW_START_NOW_LAST_SECONDS && remaining >= 0;
-
     setShowStartNow(shouldShow);
   }, []);
 
   const handleStartNow = () => {
-    // ✅ choose where this should go
-    // examples:
-    // navigate("/editor");
-    // navigate("/workflow");
-    // navigate("/projects/new");
     navigate("/editor");
-
     closeDemo();
   };
 
@@ -77,9 +111,7 @@ const Dashboard = () => {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-background/90 backdrop-blur-sm">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <span className="text-sm font-semibold tracking-tight">XR</span>
-          <Button size="sm" variant="outline" className="text-xs h-8">
-            Get Early Access
-          </Button>
+          <EarlyAccessForm />
         </div>
       </nav>
 
@@ -176,14 +208,12 @@ const Dashboard = () => {
           <p className="text-muted-foreground mb-8 max-w-md">
             Join the waitlist. Be among the first to experience spatial workflows.
           </p>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 items-center">
             <Button size="lg" className="text-sm tracking-wide" onClick={openDemo}>
               <Play className="w-4 h-4 mr-2" />
               Try the Demo
             </Button>
-            <Button size="lg" variant="outline" className="text-sm tracking-wide">
-              Get Early Access
-            </Button>
+            <EarlyAccessForm />
           </div>
         </motion.div>
       </section>

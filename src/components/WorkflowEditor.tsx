@@ -1,18 +1,17 @@
+// src/components/WorkflowEditor.tsx
 import { useState, useCallback } from "react";
 import { motion, Reorder } from "framer-motion";
 import { GripVertical, Pencil, Trash2, Plus, Check, X, Clock } from "lucide-react";
+import type { WorkflowStep } from "@/types/workflow";
 
-export type WorkflowEditorStep = {
-  id: string;              // stable id (uuid-like or "step-1")
-  title: string;           // short title
-  description?: string;    // optional detail
-  durationSec?: number;    // optional timer in seconds
-};
+// Re-export so existing imports of WorkflowEditorStep keep working.
+export type { WorkflowStep as WorkflowEditorStep };
+export type { WorkflowStep };
 
 interface WorkflowEditorProps {
-  steps: WorkflowEditorStep[];
-  onUpdate: (steps: WorkflowEditorStep[]) => void;
-  onSelectStep?: (step: WorkflowEditorStep) => void;
+  steps: WorkflowStep[];
+  onUpdate: (steps: WorkflowStep[]) => void;
+  onSelectStep?: (step: WorkflowStep) => void;
 }
 
 const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) => {
@@ -22,14 +21,13 @@ const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) 
   const [editTimer, setEditTimer] = useState<number>(0);
 
   const handleReorder = useCallback(
-    (newOrder: WorkflowEditorStep[]) => {
-      // Keep IDs stable; just update ordering.
+    (newOrder: WorkflowStep[]) => {
       onUpdate(newOrder);
     },
     [onUpdate]
   );
 
-  const startEdit = (step: WorkflowEditorStep) => {
+  const startEdit = (step: WorkflowStep) => {
     setEditingId(step.id);
     setEditTitle(step.title);
     setEditDescription(step.description ?? "");
@@ -44,7 +42,7 @@ const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) 
         ? {
           ...s,
           title: editTitle.trim() || "Untitled step",
-          description: editDescription.trim() || "",
+          description: editDescription.trim() || undefined,
           durationSec: editTimer > 0 ? editTimer : undefined,
         }
         : s
@@ -55,16 +53,14 @@ const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) 
   };
 
   const deleteStep = (id: string) => {
-    const filtered = steps.filter((s) => s.id !== id);
-    onUpdate(filtered);
+    onUpdate(steps.filter((s) => s.id !== id));
   };
 
   const addStep = () => {
-    const newStep: WorkflowEditorStep = {
-      id: `step-${Date.now()}`, // stable unique id
+    const newStep: WorkflowStep = {
+      id: `step-${Date.now()}`,
       title: "New step",
       description: "New instruction step — edit me.",
-      durationSec: undefined,
     };
     onUpdate([...steps, newStep]);
   };
@@ -90,7 +86,6 @@ const WorkflowEditor = ({ steps, onUpdate, onSelectStep }: WorkflowEditorProps) 
                 <GripVertical className="w-5 h-5" />
               </div>
 
-              {/* Display number based on position (not id) */}
               <span className="shrink-0 w-8 h-8 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary font-mono">
                 {index + 1}
               </span>
