@@ -286,7 +286,7 @@ Return STRICT JSON ONLY — no markdown, no commentary, no backticks:
         try {
             // Use anthropic.beta.messages.create for PDF document support
             const response = await anthropic.beta.messages.create({
-                model: "claude-3-5-sonnet-20241022",
+                model: "claude-sonnet-4-6",
                 max_tokens: 2048,
                 betas: ["pdfs-2024-09-25"],
                 messages: [
