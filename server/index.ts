@@ -1,135 +1,160 @@
 // server/index.ts
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs/promises";
 import crypto from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 
-// ---------- Types ----------
-type WorkflowStep = {
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface WorkflowStep {
     stepId: string;
     order: number;
     title: string;
     description?: string;
     durationSec?: number;
     page?: number;
-};
+}
 
-export type WorkflowPayload = {
+interface WorkflowPayload {
     workflowUUID: string;
     workflowId: string;
     name: string;
     steps: WorkflowStep[];
     createdAt: string;
     updatedAt: string;
-};
+}
 
-type GeneratedStep = {
+interface GeneratedStep {
     title: string;
     description?: string;
     durationSec?: number;
     page?: number;
-};
+}
 
-type GeneratedWorkflow = {
+interface GeneratedWorkflow {
     title?: string;
     steps: GeneratedStep[];
-};
+}
 
-// ---------- App ----------
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const PORT = Number(process.env.PORT ?? 10000);
+const DATA_DIR = process.env.DATA_DIR ?? "/tmp";
+const CORS_ORIGIN = process.env.CORS_ORIGIN ?? "*";
+
+// ── Express app ───────────────────────────────────────────────────────────────
+
 const app = express();
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// ---------- Config ----------
-const PORT = Number(process.env.PORT || 10000);
-const DATA_DIR = process.env.DATA_DIR || "/tmp";
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
 app.use(
     cors({
         origin: CORS_ORIGIN === "*" ? "*" : CORS_ORIGIN.split(",").map((s) => s.trim()),
     })
 );
-app.use(express.json({ limit: "20mb" })); // larger limit for PDF base64
+// 20 MB limit to accommodate base64-encoded PDF bodies
+app.use(express.json({ limit: "20mb" }));
 
-// ---------- Helpers ----------
-async function ensureDataDir() {
+// ── Anthropic client ──────────────────────────────────────────────────────────
+
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+});
+
+// ── File-system helpers ───────────────────────────────────────────────────────
+
+async function ensureDataDir(): Promise<void> {
     await fs.mkdir(DATA_DIR, { recursive: true });
 }
 
-function workflowPath(id: string) {
+function workflowFilePath(id: string): string {
     return path.join(DATA_DIR, `${id}.json`);
 }
 
-function safeId(id: string) {
+/** Strip everything except alphanumeric, dash, underscore — prevents path traversal. */
+function safeId(id: string): string {
     return id.replace(/[^a-zA-Z0-9-_]/g, "");
 }
 
-function nowISO() {
+function nowISO(): string {
     return new Date().toISOString();
 }
 
-function newUUID() {
+function newUUID(): string {
     return crypto.randomUUID();
 }
 
-function validateIncoming(body: any): { ok: true } | { ok: false; error: string } {
-    if (!body) return { ok: false, error: "Missing body" };
-    if (typeof body.name !== "string" || !body.name.trim()) return { ok: false, error: "Missing name" };
-    if (!Array.isArray(body.steps)) return { ok: false, error: "steps must be an array" };
-    if (body.steps.length === 0) return { ok: false, error: "steps must not be empty" };
+// ── Workflow validation / normalisation ───────────────────────────────────────
+
+function validateIncoming(body: unknown): { ok: true } | { ok: false; error: string } {
+    if (!body || typeof body !== "object") return { ok: false, error: "Missing body" };
+    const b = body as Record<string, unknown>;
+    if (typeof b.name !== "string" || !b.name.trim()) return { ok: false, error: "Missing name" };
+    if (!Array.isArray(b.steps)) return { ok: false, error: "steps must be an array" };
+    if (b.steps.length === 0) return { ok: false, error: "steps must not be empty" };
     return { ok: true };
 }
 
-function normalizeWorkflow(body: any): WorkflowPayload {
-    const workflowUUID = safeId(body.workflowUUID || newUUID());
-    const workflowId = safeId(body.workflowId || workflowUUID);
-
+function normalizeWorkflow(body: Record<string, unknown>): WorkflowPayload {
+    const workflowUUID = safeId(String(body.workflowUUID ?? newUUID()));
+    const workflowId = safeId(String(body.workflowId ?? workflowUUID));
     const createdAt = typeof body.createdAt === "string" ? body.createdAt : nowISO();
-    const updatedAt = nowISO();
 
-    const steps: WorkflowStep[] = body.steps.map((s: any, idx: number) => ({
-        stepId: safeId(s.stepId || `step-${idx + 1}`),
-        order: Number.isFinite(s.order) ? s.order : idx + 1,
-        title: typeof s.title === "string" && s.title.trim() ? s.title.trim() : `Step ${idx + 1}`,
-        description: typeof s.description === "string" ? s.description : undefined,
-        durationSec: Number.isFinite(s.durationSec) && s.durationSec > 0 ? Math.round(s.durationSec) : undefined,
-        page: Number.isFinite(s.page) && s.page >= 1 ? Math.floor(s.page) : undefined,
-    }));
+    const rawSteps = Array.isArray(body.steps) ? body.steps : [];
+    const steps: WorkflowStep[] = rawSteps.map((s: unknown, idx: number) => {
+        const step = (s ?? {}) as Record<string, unknown>;
+        return {
+            stepId: safeId(String(step.stepId ?? `step-${idx + 1}`)),
+            order: typeof step.order === "number" && Number.isFinite(step.order) ? step.order : idx + 1,
+            title:
+                typeof step.title === "string" && step.title.trim()
+                    ? step.title.trim()
+                    : `Step ${idx + 1}`,
+            description: typeof step.description === "string" ? step.description : undefined,
+            durationSec:
+                typeof step.durationSec === "number" && step.durationSec > 0
+                    ? Math.round(step.durationSec)
+                    : undefined,
+            page:
+                typeof step.page === "number" && step.page >= 1
+                    ? Math.floor(step.page)
+                    : undefined,
+        };
+    });
 
     return {
         workflowUUID,
         workflowId,
-        name: body.name.trim(),
+        name: (body.name as string).trim(),
         steps,
         createdAt,
-        updatedAt,
+        updatedAt: nowISO(),
     };
 }
 
-async function writeWorkflow(wf: WorkflowPayload) {
+async function writeWorkflow(wf: WorkflowPayload): Promise<void> {
     await ensureDataDir();
-    await fs.writeFile(workflowPath(wf.workflowUUID), JSON.stringify(wf, null, 2), "utf-8");
+    await fs.writeFile(workflowFilePath(wf.workflowUUID), JSON.stringify(wf, null, 2), "utf-8");
 }
 
 async function readWorkflow(id: string): Promise<WorkflowPayload | null> {
     try {
-        const p = workflowPath(safeId(id));
-        const raw = await fs.readFile(p, "utf-8");
+        const raw = await fs.readFile(workflowFilePath(safeId(id)), "utf-8");
         return JSON.parse(raw) as WorkflowPayload;
     } catch {
         return null;
     }
 }
 
-async function listWorkflows(): Promise<Array<Pick<WorkflowPayload, "workflowUUID" | "workflowId" | "name" | "createdAt" | "updatedAt">>> {
+async function listWorkflows(): Promise<
+    Pick<WorkflowPayload, "workflowUUID" | "workflowId" | "name" | "createdAt" | "updatedAt">[]
+> {
     await ensureDataDir();
-    const files = await fs.readdir(DATA_DIR);
-    const jsonFiles = files.filter((f) => f.endsWith(".json"));
+    const files = (await fs.readdir(DATA_DIR)).filter((f) => f.endsWith(".json"));
 
     const items = await Promise.all(
-        jsonFiles.map(async (f) => {
+        files.map(async (f) => {
             const raw = await fs.readFile(path.join(DATA_DIR, f), "utf-8");
             const wf = JSON.parse(raw) as WorkflowPayload;
             return {
@@ -142,60 +167,68 @@ async function listWorkflows(): Promise<Array<Pick<WorkflowPayload, "workflowUUI
         })
     );
 
-    items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-    return items;
+    return items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 }
 
+// ── Claude Haiku helpers ──────────────────────────────────────────────────────
+
+/**
+ * Strips markdown fences and attempts to parse JSON.
+ * Falls back to extracting the first {...} block, then repairs bare newlines.
+ */
 function extractJsonFromText(text: string): unknown {
     const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
 
-    const tryParse = (s: string) => {
+    const tryParse = (s: string): unknown => {
         try {
             return JSON.parse(s);
         } catch {
-            const repaired = s.replace(/\r?\n/g, "\\n");
-            return JSON.parse(repaired);
+            return JSON.parse(s.replace(/\r?\n/g, "\\n"));
         }
     };
 
-    try { return tryParse(cleaned); } catch { /* fall through */ }
+    try {
+        return tryParse(cleaned);
+    } catch { /* fall through */ }
 
     const first = cleaned.indexOf("{");
     const last = cleaned.lastIndexOf("}");
-    if (first === -1 || last === -1 || last <= first) {
+    if (first === -1 || last <= first) {
         throw new Error("No JSON object found in Claude output.");
     }
     return tryParse(cleaned.slice(first, last + 1));
 }
 
 function normalizeGeneratedWorkflow(raw: unknown): GeneratedWorkflow {
-    if (!raw || typeof raw !== "object") throw new Error("Claude returned non-object JSON.");
-
-    const wf = raw as any;
+    if (!raw || typeof raw !== "object") {
+        throw new Error("Claude returned non-object JSON.");
+    }
+    const wf = raw as Record<string, unknown>;
     if (!Array.isArray(wf.steps) || wf.steps.length === 0) {
         throw new Error("Claude returned JSON but 'steps' is missing or empty.");
     }
 
-    const steps = wf.steps
+    const steps: GeneratedStep[] = (wf.steps as unknown[])
         .filter(Boolean)
         .slice(0, 20)
-        .map((s: any) => {
-            const title = typeof s.title === "string" ? s.title.trim() : "";
+        .map((s: unknown) => {
+            const step = (s ?? {}) as Record<string, unknown>;
+            const title = typeof step.title === "string" ? step.title.trim() : "";
             if (!title) throw new Error("Claude produced a step without a title.");
 
-            const description = typeof s.description === "string" ? s.description.trim() : undefined;
-
-            let durationSec: number | undefined;
-            if (typeof s.durationSec === "number" && Number.isFinite(s.durationSec) && s.durationSec > 0) {
-                durationSec = Math.round(s.durationSec);
-            }
-
-            let page: number | undefined;
-            if (typeof s.page === "number" && Number.isFinite(s.page) && s.page >= 1) {
-                page = Math.floor(s.page);
-            }
-
-            return { title, description, durationSec, page };
+            return {
+                title,
+                description:
+                    typeof step.description === "string" ? step.description.trim() : undefined,
+                durationSec:
+                    typeof step.durationSec === "number" && step.durationSec > 0
+                        ? Math.round(step.durationSec)
+                        : undefined,
+                page:
+                    typeof step.page === "number" && step.page >= 1
+                        ? Math.floor(step.page)
+                        : undefined,
+            };
         });
 
     return {
@@ -204,144 +237,166 @@ function normalizeGeneratedWorkflow(raw: unknown): GeneratedWorkflow {
     };
 }
 
-// ---------- Routes ----------
+// ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get("/health", async (_req, res) => {
-    await ensureDataDir();
-    res.json({ ok: true });
+app.get("/health", (_req: Request, res: Response) => {
+    void ensureDataDir().then(() => res.json({ ok: true }));
 });
 
-// ------------------------------------
-// AI: Generate workflow from PDF
-// ------------------------------------
-app.post("/api/generate-workflow", async (req, res) => {
-    const { pdfBase64, filename } = req.body as { pdfBase64?: string; filename?: string };
+// ── AI: Generate workflow from PDF via Claude Haiku ───────────────────────────
 
-    if (!pdfBase64 || typeof pdfBase64 !== "string") {
-        return res.status(400).json({ error: "Missing pdfBase64 in request body" });
-    }
-    if (!process.env.ANTHROPIC_API_KEY) {
-        return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY" });
-    }
+app.post("/api/generate-workflow", (req: Request, res: Response) => {
+    void (async () => {
+        const { pdfBase64, filename } = req.body as {
+            pdfBase64?: unknown;
+            filename?: unknown;
+        };
 
-    const prompt = `You are a workflow extraction engine that produces AR-ready step-by-step instructions.
+        if (typeof pdfBase64 !== "string" || !pdfBase64) {
+            res.status(400).json({ error: "Missing pdfBase64 in request body" });
+            return;
+        }
+        if (!process.env.ANTHROPIC_API_KEY) {
+            res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY" });
+            return;
+        }
 
-The input is a PDF that may be IMAGE/DIAGRAM heavy (e.g., IKEA manuals with mostly pictures).
+        const safeFilename = typeof filename === "string" ? filename : "document.pdf";
+
+        const prompt = `You are a workflow extraction engine that produces AR-ready step-by-step instructions.
+
+The input is a PDF named "${safeFilename}". It may be IMAGE/DIAGRAM heavy (e.g., IKEA manuals).
 Primary goal: infer steps from diagrams/illustrations. Treat visuals as the source of truth.
 
-Instructions:
-- If the PDF contains diagrams, exploded views, arrows, parts callouts, numbered panels: use those to infer the steps.
-- Ignore marketing text and irrelevant labels.
-- Only use text when it is necessary to disambiguate part names or safety warnings.
-- Produce concise, actionable, ordered steps.
-- 6 to 20 steps max. If the PDF is large, summarize to the essential steps.
-- If timing is implied (wait/bake/cure/heat), set durationSec. Otherwise omit durationSec.
+Rules:
+- Use diagrams, exploded views, arrows, numbered panels to determine the steps.
+- Ignore marketing text. Only use text to clarify part names or safety warnings.
+- Produce concise, actionable, ordered steps (6 to 20 steps max).
+- If timing is implied (wait/bake/cure/heat), set durationSec. Otherwise omit it.
+- For each step, include a 1-based "page" number for the most relevant PDF page.
 
-CRITICAL: Align steps to PDF pages.
-For each step, include a 1-based "page" number indicating the most relevant PDF page where that step is shown.
-If a step spans multiple pages, choose the best primary page.
-
-Return STRICT JSON ONLY in this exact schema (no markdown, no commentary, no backticks, no extra keys):
-
+Return STRICT JSON ONLY — no markdown, no commentary, no backticks:
 {
   "title": "short workflow name",
   "steps": [
-    {
-      "title": "Step title",
-      "description": "1-3 sentences max",
-      "durationSec": 120,
-      "page": 3
-    }
+    { "title": "Step title", "description": "1-3 sentences", "durationSec": 120, "page": 3 }
   ]
 }`;
 
-    try {
-        const message = await anthropic.messages.create({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 2048,
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "document",
-                            source: {
-                                type: "base64",
-                                media_type: "application/pdf",
-                                data: pdfBase64,
+        try {
+            // Use anthropic.beta.messages.create for PDF document support
+            const response = await anthropic.beta.messages.create({
+                model: "claude-3-haiku-20240307",
+                max_tokens: 2048,
+                betas: ["pdfs-2024-09-25"],
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "document",
+                                source: {
+                                    type: "base64",
+                                    media_type: "application/pdf",
+                                    data: pdfBase64,
+                                },
                             },
-                        } as any,
-                        {
-                            type: "text",
-                            text: prompt,
-                        },
-                    ],
-                },
-            ],
-            betas: ["pdfs-2024-09-25"] as any,
-        });
+                            {
+                                type: "text",
+                                text: prompt,
+                            },
+                        ],
+                    },
+                ],
+            });
 
-        const text = message.content
-            .filter((b: any) => b.type === "text")
-            .map((b: any) => b.text)
-            .join("")
-            .trim();
+            const text = response.content
+                .filter((b) => b.type === "text")
+                .map((b) => (b as { type: "text"; text: string }).text)
+                .join("")
+                .trim();
 
-        if (!text) throw new Error("Claude returned empty output.");
+            if (!text) throw new Error("Claude returned empty output.");
 
-        const parsed = extractJsonFromText(text);
-        const workflow = normalizeGeneratedWorkflow(parsed);
+            const parsed = extractJsonFromText(text);
+            const workflow = normalizeGeneratedWorkflow(parsed);
 
-        return res.json(workflow);
-    } catch (err: any) {
-        console.error("Claude API error:", err);
-        return res.status(500).json({ error: err?.message || "Failed to generate workflow." });
-    }
+            res.json(workflow);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "Failed to generate workflow.";
+            console.error("Claude API error:", message);
+            res.status(500).json({ error: message });
+        }
+    })();
 });
 
-// ------------------------------------
-// Workflows CRUD
-// ------------------------------------
+// ── Workflows CRUD ────────────────────────────────────────────────────────────
 
-// Create or overwrite workflow
-app.post("/api/workflows", async (req, res) => {
-    const v = validateIncoming(req.body);
-    if (!v.ok) return res.status(400).json({ error: v.error });
-
-    const wf = normalizeWorkflow(req.body);
-    await writeWorkflow(wf);
-    return res.status(201).json(wf);
+/** POST /api/workflows — create or overwrite */
+app.post("/api/workflows", (req: Request, res: Response) => {
+    void (async () => {
+        const v = validateIncoming(req.body);
+        if (!v.ok) {
+            res.status(400).json({ error: v.error });
+            return;
+        }
+        const wf = normalizeWorkflow(req.body as Record<string, unknown>);
+        await writeWorkflow(wf);
+        res.status(201).json(wf);
+    })();
 });
 
-// List all (metadata only)
-app.get("/api/workflows", async (_req, res) => {
-    const list = await listWorkflows();
-    res.json({ items: list });
+/** GET /api/workflows — list (metadata only) */
+app.get("/api/workflows", (_req: Request, res: Response) => {
+    void (async () => {
+        const list = await listWorkflows();
+        res.json({ items: list });
+    })();
 });
 
-// Fetch one by UUID
-app.get("/api/workflows/:workflowUUID", async (req, res) => {
-    const id = safeId(req.params.workflowUUID);
-    const wf = await readWorkflow(id);
-    if (!wf) return res.status(404).json({ error: "Not found" });
-    res.json(wf);
+/** GET /api/workflows/:workflowUUID — fetch one */
+app.get("/api/workflows/:workflowUUID", (req: Request, res: Response) => {
+    void (async () => {
+        const id = safeId(req.params.workflowUUID);
+        const wf = await readWorkflow(id);
+        if (!wf) {
+            res.status(404).json({ error: "Not found" });
+            return;
+        }
+        res.json(wf);
+    })();
 });
 
-// Delete one by UUID
-app.delete("/api/workflows/:workflowUUID", async (req, res) => {
-    const id = safeId(req.params.workflowUUID);
-    const p = workflowPath(id);
-    try {
-        await fs.unlink(p);
-        return res.json({ ok: true });
-    } catch (err: any) {
-        if (err.code === "ENOENT") return res.status(404).json({ error: "Not found" });
-        throw err;
-    }
+/** DELETE /api/workflows/:workflowUUID — remove */
+app.delete("/api/workflows/:workflowUUID", (req: Request, res: Response) => {
+    void (async () => {
+        const id = safeId(req.params.workflowUUID);
+        try {
+            await fs.unlink(workflowFilePath(id));
+            res.json({ ok: true });
+        } catch (err: unknown) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code === "ENOENT") {
+                res.status(404).json({ error: "Not found" });
+            } else {
+                res.status(500).json({ error: "Failed to delete workflow" });
+            }
+        }
+    })();
 });
+
+// ── Global error handler ──────────────────────────────────────────────────────
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    console.error("Unhandled error:", message);
+    res.status(500).json({ error: message });
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
     console.log(`API running on :${PORT}`);
     console.log(`DATA_DIR=${DATA_DIR}`);
-    console.log(`Anthropic SDK ready: ${!!process.env.ANTHROPIC_API_KEY}`);
+    console.log(`Anthropic key set: ${!!process.env.ANTHROPIC_API_KEY}`);
 });
